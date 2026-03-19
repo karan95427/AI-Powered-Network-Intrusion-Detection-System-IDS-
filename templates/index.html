@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Network IDS Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #0a0f1e; color: white; }
+        .container { padding: 24px; max-width: 1600px; margin: 0 auto; }
+
+        h1 { margin-bottom: 4px; font-size: 22px; display: flex; align-items: center; gap: 10px; }
+        .subtitle { color: #475569; font-size: 13px; margin-bottom: 24px; }
+
+        /* ── Stat cards ── */
+        .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
+        .card {
+            background: #111827;
+            padding: 20px 24px;
+            border-radius: 14px;
+            border: 1px solid #1e293b;
+            position: relative;
+            overflow: hidden;
+        }
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+        }
+        .card-total::before  { background: #38bdf8; }
+        .card-alerts::before { background: #f87171; }
+        .card-normal::before { background: #4ade80; }
+
+        .card h3 { margin: 0 0 10px; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+        .card h2 { margin: 0; font-size: 32px; font-weight: 700; }
+        .card-alerts h2 { color: #f87171; }
+        .card-normal h2 { color: #4ade80; }
+        .card-total  h2 { color: #38bdf8; }
+
+        /* ── Top row layout ── */
+        .main { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+        .panel {
+            background: #111827;
+            border: 1px solid #1e293b;
+            border-radius: 14px;
+            padding: 20px;
+        }
+        .panel h3 { margin: 0 0 14px; font-size: 14px; color: #94a3b8; display: flex; align-items: center; gap: 8px; }
+
+        /* ── Chart ── */
+        .chart-wrap { position: relative; height: 320px; }
+
+        .axis-note {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #475569;
+            margin-top: 6px;
+            padding: 0 4px;
+        }
+
+        /* hover tooltip */
+        #hover-tooltip {
+            display: none;
+            position: absolute;
+            background: #0a0f1e;
+            border-radius: 10px;
+            padding: 12px 16px;
+            font-size: 13px;
+            line-height: 2;
+            min-width: 215px;
+            z-index: 99;
+            pointer-events: none;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+        }
+        #hover-tooltip.alert-tip  { border: 1px solid #f87171; }
+        #hover-tooltip.normal-tip { border: 1px solid #4ade80; }
+        .tip-title { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+        .alert-tip  .tip-title { color: #f87171; }
+        .normal-tip .tip-title { color: #4ade80; }
+        #hover-tooltip span { color: #475569; font-size: 12px; }
+        #hover-tooltip b    { color: #e2e8f0; }
+
+        /* ── Alerts panel (deduplicated) ── */
+        #alert_list { padding: 0; margin: 0; overflow-y: auto; max-height: 310px; }
+        #alert_list li {
+            list-style: none;
+            padding: 9px 12px;
+            border-radius: 8px;
+            margin-bottom: 6px;
+            background: rgba(248,113,113,0.07);
+            border: 1px solid rgba(248,113,113,0.15);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+        #alert_list li .ip   { color: #f87171; font-weight: 600; font-size: 13px; }
+        #alert_list li .cnt  {
+            background: #f87171;
+            color: #0a0f1e;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 20px;
+            white-space: nowrap;
+        }
+
+        /* ── Log table ── */
+        .log-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 14px;
+        }
+        .log-header h3 { margin: 0; font-size: 14px; color: #94a3b8; display: flex; align-items: center; gap: 8px; }
+
+        .filter-btns { display: flex; gap: 8px; }
+        .filter-btns button {
+            padding: 5px 14px;
+            border-radius: 20px;
+            border: 1px solid #1e293b;
+            background: transparent;
+            color: #64748b;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .filter-btns button:hover           { border-color: #334155; color: #94a3b8; }
+        .filter-btns button.active-all      { background: #1e293b; color: #e2e8f0; border-color: #334155; }
+        .filter-btns button.active-alert    { background: rgba(248,113,113,0.12); border-color: #f87171; color: #f87171; }
+        .filter-btns button.active-normal   { background: rgba(74,222,128,0.12);  border-color: #4ade80; color: #4ade80; }
+
+        .table-wrap { overflow-x: auto; max-height: 360px; overflow-y: auto; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+        thead th {
+            position: sticky; top: 0;
+            background: #0a0f1e;
+            color: #475569;
+            text-align: left;
+            padding: 10px 14px;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            border-bottom: 1px solid #1e293b;
+            white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+        }
+        thead th:hover { color: #94a3b8; }
+        thead th .sort-arrow { margin-left: 4px; opacity: 0.4; }
+        thead th.sorted .sort-arrow { opacity: 1; color: #38bdf8; }
+
+        tbody tr { border-bottom: 1px solid #111827; transition: background 0.12s; }
+        tbody tr:hover { background: #1a2540; }
+        tbody tr.row-alert  { background: rgba(248,113,113,0.05); }
+        tbody tr.row-alert:hover  { background: rgba(248,113,113,0.1); }
+        tbody tr.row-normal { background: rgba(74,222,128,0.03); }
+        tbody tr.row-normal:hover { background: rgba(74,222,128,0.07); }
+
+        /* left accent bar */
+        tbody tr.row-alert  td:first-child { border-left: 3px solid #f87171; }
+        tbody tr.row-normal td:first-child { border-left: 3px solid #4ade80; }
+
+        tbody td { padding: 10px 14px; white-space: nowrap; }
+
+        .badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .badge-alert  { background: rgba(248,113,113,0.12); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
+        .badge-normal { background: rgba(74,222,128,0.12);  color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+
+        .proto-pill {
+            display: inline-block; padding: 2px 8px; border-radius: 4px;
+            font-size: 11px; font-weight: 700;
+        }
+        .proto-TCP  { background: rgba(56,189,248,0.12); color: #38bdf8; }
+        .proto-UDP  { background: rgba(168,85,247,0.12); color: #a855f7; }
+        .proto-ICMP { background: rgba(251,191,36,0.12); color: #fbbf24; }
+        .proto-pill:not(.proto-TCP):not(.proto-UDP):not(.proto-ICMP) { background: #1e293b; color: #64748b; }
+
+        /* top attacker badge */
+        .top-badge {
+            display: inline-block;
+            padding: 1px 7px;
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: 700;
+            background: rgba(251,191,36,0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(251,191,36,0.3);
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+
+        .empty-row td { text-align: center; color: #334155; padding: 32px; font-size: 13px; }
+
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+    </style>
+</head>
+
+<body>
+<div class="container">
+
+    <h1>🚨 AI Network IDS Dashboard</h1>
+    <p class="subtitle">Real-time intrusion detection — updates every 2 seconds</p>
+
+    <!-- Stat cards -->
+    <div class="cards">
+        <div class="card card-total">
+            <h3>Total Packets</h3>
+            <h2 id="total_packets">0</h2>
+        </div>
+        <div class="card card-alerts">
+            <h3>Total Alerts</h3>
+            <h2 id="alerts">0</h2>
+        </div>
+        <div class="card card-normal">
+            <h3>Normal Traffic</h3>
+            <h2 id="normal">0</h2>
+        </div>
+    </div>
+
+    <!-- Graph + Alerts -->
+    <div class="main">
+
+        <!-- Chart panel -->
+        <div class="panel">
+            <h3>📊 Live Packet Rate</h3>
+            <div class="chart-wrap">
+                <canvas id="chart"></canvas>
+
+                <div id="hover-tooltip">
+                    <div class="tip-title" id="tip-status">—</div>
+                    <div><span>Time &nbsp;&nbsp;&nbsp;: </span><b id="tip-time">—</b></div>
+                    <div><span>Src IP &nbsp;: </span><b id="tip-src">—</b></div>
+                    <div><span>Dst IP &nbsp;: </span><b id="tip-dst">—</b></div>
+                    <div><span>Protocol: </span><b id="tip-proto">—</b></div>
+                    <div><span>Pkt Len : </span><b id="tip-len">—</b></div>
+                    <div><span>Count/10s:</span><b id="tip-count">—</b></div>
+                    <div><span>Rate &nbsp;&nbsp;&nbsp;: </span><b id="tip-rate">—</b> pkts/s</div>
+                </div>
+            </div>
+            <div class="axis-note">
+                <span>← older &nbsp;&nbsp; X-axis: Time (last 50 packets) &nbsp;&nbsp; newer →</span>
+                <span>Y-axis: Packets / sec</span>
+            </div>
+        </div>
+
+        <!-- Alerts panel (deduplicated) -->
+        <div class="panel">
+            <h3>🚨 Live Alerts <span style="color:#475569;font-size:11px;font-weight:400">(unique IPs)</span></h3>
+            <ul id="alert_list"></ul>
+        </div>
+
+    </div>
+
+    <!-- Traffic log table -->
+    <div class="panel">
+        <div class="log-header">
+            <h3>🖥️ Live Traffic Log</h3>
+            <div class="filter-btns">
+                <button id="btn-all"    class="active-all"  onclick="setFilter('all')">All</button>
+                <button id="btn-alert"  onclick="setFilter('alert')">🔴 Alerts</button>
+                <button id="btn-normal" onclick="setFilter('normal')">🟢 Normal</button>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th onclick="sortBy('i')">#<span class="sort-arrow">↕</span></th>
+                        <th onclick="sortBy('src')">Src IP<span class="sort-arrow">↕</span></th>
+                        <th onclick="sortBy('dst')">Dst IP<span class="sort-arrow">↕</span></th>
+                        <th onclick="sortBy('protocol')">Protocol<span class="sort-arrow">↕</span></th>
+                        <th onclick="sortBy('packet_length')">Pkt Length<span class="sort-arrow">↕</span></th>
+                        <th onclick="sortBy('packet_rate')">Pkt Rate<span class="sort-arrow">↕</span></th>
+                        <th onclick="sortBy('packet_count')">Count/10s<span class="sort-arrow">↕</span></th>
+                        <th onclick="sortBy('result')">Result<span class="sort-arrow">↕</span></th>
+                    </tr>
+                </thead>
+                <tbody id="log-tbody">
+                    <tr class="empty-row"><td colspan="8">Waiting for traffic...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<script>
+const PROTO = { 1: "ICMP", 6: "TCP", 17: "UDP" };
+const MAX_POINTS = 50;
+const graphBuffer = [];
+let lastTotalPackets = 0;
+let chart;
+let currentFilter = 'all';
+let logRows = [];
+let topAttackers = new Set();
+
+// sort state
+let sortKey = 'i';
+let sortAsc = true;
+
+// ── Chart colours ────────────────────────────────────────────────
+function pointColor(ctx) {
+    const pt = graphBuffer[ctx.dataIndex];
+    return pt && pt.is_alert ? '#f87171' : '#4ade80';
+}
+
+// ── Init Chart ───────────────────────────────────────────────────
+function initChart() {
+    const canvasCtx = document.getElementById('chart').getContext('2d');
+    chart = new Chart(canvasCtx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Pkts/sec',
+                data: [],
+                borderColor: '#38bdf8',
+                borderWidth: 2,
+                pointBackgroundColor:      pointColor,
+                pointBorderColor:          pointColor,
+                pointHoverBackgroundColor: pointColor,
+                pointHoverBorderColor:     '#fff',
+                pointRadius: 5,
+                pointHoverRadius: 8,
+                pointHoverBorderWidth: 2,
+                backgroundColor: 'rgba(56,189,248,0.06)',
+                tension: 0.4,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 500, easing: 'easeInOutQuart' },
+            transitions: { active: { animation: { duration: 0 } } },
+            plugins: {
+                legend: { labels: { color: '#334155', font: { size: 12 } } },
+                tooltip: { enabled: false }
+            },
+            scales: {
+                x: {
+                    ticks: { color: '#334155', maxTicksLimit: 8, font: { size: 11 } },
+                    grid:  { color: '#0f172a' },
+                    title: {
+                        display: true,
+                        text: 'Time (last 50 packets)',
+                        color: '#334155',
+                        font: { size: 11 }
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: { color: '#334155', font: { size: 11 } },
+                    grid:  { color: '#1a2535' },
+                    title: {
+                        display: true,
+                        text: 'Packets / sec',
+                        color: '#475569',
+                        font: { size: 12, weight: '600' }
+                    }
+                }
+            },
+            onHover(event, elements) {
+                const tip = document.getElementById('hover-tooltip');
+                if (!elements || !elements.length) { tip.style.display = 'none'; return; }
+                const idx = elements[0].index;
+                const pt  = graphBuffer[idx];
+                if (!pt) { tip.style.display = 'none'; return; }
+
+                const box  = document.querySelector('.chart-wrap');
+                const rect = box.getBoundingClientRect();
+                let x = event.native.clientX - rect.left + 16;
+                let y = event.native.clientY - rect.top  - 16;
+                if (x + 230 > box.offsetWidth)  x -= 250;
+                if (y + 210 > box.offsetHeight) y -= 220;
+
+                const isAlert = pt.is_alert;
+                tip.className = isAlert ? 'alert-tip' : 'normal-tip';
+                document.getElementById('tip-status').textContent = isAlert ? '🚨 ALERT Packet' : '✅ Normal Packet';
+                document.getElementById('tip-time').textContent   = pt.label;
+                document.getElementById('tip-src').textContent    = pt.src;
+                document.getElementById('tip-dst').textContent    = pt.dst;
+                document.getElementById('tip-proto').textContent  = PROTO[pt.proto] || pt.proto;
+                document.getElementById('tip-len').textContent    = pt.len + ' bytes';
+                document.getElementById('tip-count').textContent  = pt.count;
+                document.getElementById('tip-rate').textContent   = pt.y.toFixed(3);
+
+                tip.style.left    = x + 'px';
+                tip.style.top     = y + 'px';
+                tip.style.display = 'block';
+            }
+        }
+    });
+}
+
+function pushPoint(item, timeLabel) {
+    graphBuffer.push({
+        label: timeLabel, y: item.packet_rate,
+        src: item.src, dst: item.dst,
+        proto: item.protocol, len: item.packet_length,
+        count: item.packet_count, is_alert: item.is_alert
+    });
+    if (graphBuffer.length > MAX_POINTS) graphBuffer.shift();
+
+    chart.data.labels = graphBuffer.map(d => d.label);
+    chart.data.datasets[0].data = graphBuffer.map(d => ({ x: d.label, y: d.y }));
+    chart.update();
+}
+
+// ── Poll new graph data ──────────────────────────────────────────
+function pollNewData() {
+    fetch("/stats")
+        .then(r => r.json())
+        .then(stats => {
+            const total = stats.total_packets || 0;
+
+            if (total < lastTotalPackets) {
+                lastTotalPackets = 0;
+                graphBuffer.length = 0;
+            }
+
+            document.getElementById("total_packets").innerText = stats.total_packets ?? 0;
+            document.getElementById("alerts").innerText        = stats.alerts        ?? 0;
+            document.getElementById("normal").innerText        = stats.normal        ?? 0;
+
+            if (total === lastTotalPackets) return;
+
+            const newCount = total - lastTotalPackets;
+            lastTotalPackets = total;
+
+            fetch("/data")
+                .then(r => r.json())
+                .then(rows => {
+                    if (!rows || !rows.length) return;
+                    const fresh = rows.slice(-Math.min(newCount, rows.length));
+                    const now   = new Date().toLocaleTimeString();
+                    fresh.forEach(item => pushPoint(item, now));
+                });
+        });
+}
+
+// ── Deduplicated alerts panel ────────────────────────────────────
+function updateAlerts() {
+    fetch("/top_attackers")
+        .then(r => r.json())
+        .then(attackers => {
+            // attackers = [[ip, count], ...]
+            topAttackers = new Set(attackers.map(a => a[0]));
+
+            const list = document.getElementById("alert_list");
+            list.innerHTML = "";
+
+            if (!attackers.length) {
+                list.innerHTML = '<li style="color:#334155;border:none;background:none;justify-content:center">No alerts yet</li>';
+                return;
+            }
+
+            attackers.forEach(([ip, count]) => {
+                const li = document.createElement("li");
+                li.innerHTML = `
+                    <span class="ip">⚠ ${ip}</span>
+                    <span class="cnt">${count} alert${count > 1 ? 's' : ''}</span>
+                `;
+                list.appendChild(li);
+            });
+        });
+}
+
+// ── Traffic log table ────────────────────────────────────────────
+function setFilter(f) {
+    currentFilter = f;
+    document.getElementById('btn-all').className    = f === 'all'    ? 'active-all'    : '';
+    document.getElementById('btn-alert').className  = f === 'alert'  ? 'active-alert'  : '';
+    document.getElementById('btn-normal').className = f === 'normal' ? 'active-normal' : '';
+    renderTable();
+}
+
+function sortBy(key) {
+    // toggle direction if same key
+    if (sortKey === key) sortAsc = !sortAsc;
+    else { sortKey = key; sortAsc = true; }
+
+    // update header arrows
+    document.querySelectorAll('thead th').forEach(th => th.classList.remove('sorted'));
+    const headers = ['i','src','dst','protocol','packet_length','packet_rate','packet_count','result'];
+    const idx = headers.indexOf(key);
+    if (idx >= 0) document.querySelectorAll('thead th')[idx].classList.add('sorted');
+
+    renderTable();
+}
+
+function renderTable() {
+    const tbody = document.getElementById('log-tbody');
+
+    let filtered = logRows.filter(r => {
+        if (currentFilter === 'alert')  return r.result === 'ALERT';
+        if (currentFilter === 'normal') return r.result === 'NORMAL';
+        return true;
+    });
+
+    // sort
+    filtered = filtered.slice().sort((a, b) => {
+        let av = a[sortKey], bv = b[sortKey];
+        if (sortKey === 'i') return sortAsc ? 0 : 0; // preserve order for index
+        if (typeof av === 'string') av = av.toLowerCase(), bv = bv.toLowerCase();
+        if (av < bv) return sortAsc ? -1 : 1;
+        if (av > bv) return sortAsc ?  1 : -1;
+        return 0;
+    });
+
+    if (!filtered.length) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="8">No packets to show</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = filtered.map((r, i) => {
+        const isAlert    = r.result === 'ALERT';
+        const protoName  = PROTO[r.protocol] || r.protocol;
+        const isTop      = topAttackers.has(r.src);
+
+        return `
+        <tr class="${isAlert ? 'row-alert' : 'row-normal'}">
+            <td style="color:#334155;font-size:11px">${i + 1}</td>
+            <td style="font-weight:600;color:${isAlert ? '#f87171' : '#4ade80'}">
+                ${r.src}${isTop ? '<span class="top-badge">⚡ TOP</span>' : ''}
+            </td>
+            <td style="color:#64748b">${r.dst}</td>
+            <td><span class="proto-pill proto-${protoName}">${protoName}</span></td>
+            <td style="color:#e2e8f0">${r.packet_length} <span style="color:#334155;font-size:11px">B</span></td>
+            <td style="color:#e2e8f0">${r.packet_rate.toFixed(3)} <span style="color:#334155;font-size:11px">p/s</span></td>
+            <td style="color:#e2e8f0">${r.packet_count}</td>
+            <td><span class="badge ${isAlert ? 'badge-alert' : 'badge-normal'}">${isAlert ? '⚠' : '✓'} ${r.result}</span></td>
+        </tr>`;
+    }).join('');
+}
+
+function updateLog() {
+    fetch("/log")
+        .then(r => r.json())
+        .then(rows => {
+            if (!rows || !rows.length) return;
+            logRows = rows;
+            renderTable();
+        });
+}
+
+// ── Boot ─────────────────────────────────────────────────────────
+initChart();
+pollNewData();
+updateAlerts();
+updateLog();
+
+setInterval(pollNewData,  2000);
+setInterval(updateAlerts, 2000);
+setInterval(updateLog,    2000);
+</script>
+
+</body>
+</html>
